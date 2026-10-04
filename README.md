@@ -30,3 +30,24 @@ Pair-wise GSB 标注任务仓库（第 17 批 / 265）。
 1. 在本仓库中完成提示词要求的全部内容。
 2. `./mvnw -q verify` 必须通过。
 3. 完成后在所属分支（A 或 B）上提交，产物快照的父提交必须是初始环境快照。
+
+## 实现说明
+
+代码位置：
+
+- `src/main/java/com/example/gsb/semaphore/FairSemaphore.java`：公平信号量实现
+- `src/test/java/com/example/gsb/semaphore/FairSemaphoreTest.java`：15 个 JUnit 5 测试
+
+### 设计要点
+
+- **FIFO 公平**：未立即拿到许可的线程在 `ArrayDeque` 尾部入队；`release`/扩容时在锁内直接把许可授予队首节点（出队 + 标记 granted + 计数），队列非空时新到达线程必须排队，杜绝插队与饥饿。
+- **超时获取**：`tryAcquire(timeout, unit)` 基于单调时钟 + 限时等待；超时后在锁内移除等待节点并计入 `timeoutCount`，不消耗许可。
+- **中断处理**：`acquireInterruptibly()` 被中断时锁内移除等待节点并抛出 `InterruptedException`；若中断时许可恰好已授予，则保留许可并恢复中断标记。`acquire()` 不可中断，等待期间的中断会在获取成功后恢复。
+- **动态调整**：`resize(newTotal)` 扩容立即向等待队列派发；缩容采用**惰性生效**——不撤销已发放许可，当 `已发放数 > 新总数` 时暂停派发，许可逐张归还直到低于新阈值后自动恢复，因此"发放动作"永远不会使已发放数超过当前总许可数。
+- **统计**：`getStats()` 返回快照，含总许可数、可用许可、等待线程数、总获取次数、超时次数、排队成功者的平均等待毫秒数。
+
+### 验证
+
+```bash
+./mvnw -q verify
+```
