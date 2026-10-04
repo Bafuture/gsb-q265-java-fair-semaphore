@@ -30,3 +30,34 @@ Pair-wise GSB 标注任务仓库（第 17 批 / 265）。
 1. 在本仓库中完成提示词要求的全部内容。
 2. `./mvnw -q verify` 必须通过。
 3. 完成后在所属分支（A 或 B）上提交，产物快照的父提交必须是初始环境快照。
+
+## 实现说明
+
+核心类：`src/main/java/com/example/gsb/semaphore/FairSemaphore.java`（基于 `synchronized` / `wait` / `notifyAll` 与 FIFO 等待队列实现，未使用 `java.util.concurrent.Semaphore`）。
+
+### API 概览
+
+| 方法 | 说明 |
+|------|------|
+| `acquire()` | 获取一个许可，可中断；中断后移出队列且不消耗许可 |
+| `tryAcquire(timeout, unit)` | 限时获取；超时返回 `false`，移出队列、不消耗许可 |
+| `tryAcquire()` | 非阻塞尝试获取 |
+| `release()` | 释放一个许可，按 FIFO 唤醒队头等待者；过度释放抛 `IllegalStateException` |
+| `resize(newMax)` | 动态调整总许可数（见下） |
+| `availablePermits()` / `queueLength()` / `totalAcquisitions()` / `timeoutCount()` / `averageWaitTimeMillis()` | 统计信息 |
+
+### 公平性
+
+每个等待线程对应一个等待节点，按入队顺序（FIFO）获得许可；队列非空时新到的线程一律排队，不允许插队（no barging）。释放许可时从队头开始依次定向发放。
+
+### 动态缩减许可的处理策略
+
+`resize(newMax)` 允许新总数低于当前已发放数量。此时 `availablePermits()` 会暂时为负值（表示超额发放的数量）：已发放的许可**不会被强制收回**，持有者继续使用；缩减“延迟生效”——随着持有者陆续 `release()`，可用许可逐步回升，在已发放数量降到新总数之前不会再发放任何新许可。增加总数则立即生效，并按 FIFO 唤醒等待者。
+
+### 测试
+
+`src/test/java/com/example/gsb/semaphore/FairSemaphoreTest.java` 覆盖：获取/释放、FIFO 公平顺序与防插队、超时移除且不消耗许可、动态增减（含缩减到低于已发放数）、中断清理、多线程压力下的许可守恒（已发放数永不超过总数）以及统计信息。
+
+```bash
+./mvnw -q verify
+```
